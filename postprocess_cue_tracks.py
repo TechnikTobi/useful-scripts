@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+
 """
 python postprocess_cue_tracks.py /path/to/album.cue \
    --tracks-dir "/path/to/generated/tracks" \
