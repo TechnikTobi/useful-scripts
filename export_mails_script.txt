@@ -1,0 +1,219 @@
+set DELAY_AMOUNT to 1
+
+-- Create an output directory for the current selection
+set timeStamp to do shell script "date +\"%Y-%m-%d_%H-%M-%S\""
+
+set folderName to "MAIL EXPORT " & timeStamp
+
+-- Creates the folder on the Desktop
+set quotedTargetPath to POSIX path of (path to downloads folder) & quoted form of folderName
+set targetPath to POSIX path of (path to downloads folder) & folderName
+
+do shell script "mkdir " & quotedTargetPath
+
+display dialog "Created folder:" & return & targetPath
+
+tell application "Mail"
+	activate
+	
+	set selectedMessages to selection
+	
+	if selectedMessages is {} then
+		display dialog "Please select one or more emails in Mail first." buttons {"OK"}
+		return
+	end if
+	
+	
+	-- For every selected message ...
+	repeat with theMessage in selectedMessages
+		
+		delay DELAY_AMOUNT
+		
+		-- ... construct a name for the file(s) when saving it
+		tell application "Mail"
+			activate
+			
+			
+			
+			-- Get metadata
+			set msgSubject to subject of theMessage
+			if msgSubject is missing value or msgSubject is "" then
+				set msgSubject to "No Subject"
+			end if
+			
+			set msgDate to date received of theMessage
+			
+			-- Build timestamp
+			set yyyy to year of msgDate as string
+			set mm to my padNumber((month of msgDate) as integer)
+			set dd to my padNumber(day of msgDate)
+			
+			set hh to my padNumber(hours of msgDate)
+			set mi to my padNumber(minutes of msgDate)
+			set ss to my padNumber(seconds of msgDate)
+			
+			set timeStamp to yyyy & "-" & mm & "-" & dd & "_" & hh & "-" & mi & "-" & ss
+			
+			-- Clean filename
+			set cleanSubject to my sanitizeFilename(msgSubject)
+			set cleanSubject to my replace_chars(cleanSubject, ".", "_")
+			
+			-- Some subjects end with a period - use that for the ".pdf"
+			-- If there is no trailing period, add one
+			if not (cleanSubject does not end with ".") then
+				set cleanSubject to rich text 1 thru -2 of cleanSubject
+			end if
+			
+			set fileNameBase to timeStamp & " " & cleanSubject
+		end tell
+		
+		
+		
+		tell application "Mail" to activate
+		
+		-- Open message as window and activate that
+		set msgWindow to open theMessage
+		activate
+		delay 1
+		
+		tell application "System Events"
+			tell process "Mail"
+				
+				(*
+				-- A bit weird that this is menu item number 18, likely due to the bars being counted as well
+				-- This may change with different versions of the mail program
+				-- On a german system this could also be expressed as 
+				-- click menu item "Als PDF exportieren …" of menu 1 of menu bar item "Ablage" of menu bar 1
+				click menu item 18 of menu 1 of menu bar item 3 of menu bar 1
+				*)
+				
+				-- Open print dialog
+				delay DELAY_AMOUNT
+				keystroke "p" using {command down}
+				delay DELAY_AMOUNT
+				
+				-- Sheet 1 is basically the print dialog "window"
+				tell sheet 1 of window 1
+					
+					-- Used to debug:
+					-- entire contents
+					-- The above line, when run, prints the list of UI elements in this sheet. 
+					-- Using this I found the menu button 1 of group 2 of splitter group 1, 
+					-- which is the drop down button next to "PDF" in the print dialog
+					click menu button 1 of group 2 of splitter group 1
+					delay 0.2
+					
+					-- Used to debug:
+					-- entire contents of menu button 1 of group 2 of splitter group 1
+					-- To find that we now need to click:
+					click menu item 2 of menu 1 of menu button 1 of group 2 of splitter group 1
+					delay 0.2
+					
+					-- Go to mail export directory
+					delay DELAY_AMOUNT
+					keystroke "g" using {command down, shift down}
+					delay DELAY_AMOUNT
+					keystroke targetPath
+					key code 36
+					
+					-- Create a new directory with the fileNameBase
+					delay DELAY_AMOUNT
+					keystroke "n" using {command down, shift down}
+					delay DELAY_AMOUNT
+					keystroke fileNameBase
+					key code 36
+					
+					-- Press enter to save the PDF
+					delay DELAY_AMOUNT
+					key code 36
+					
+					-- Wait for the PDF to be exported
+					delay 2
+				end tell
+				
+				(*
+				-- Save message as RTF
+				keystroke "s" using {command down, shift down}
+				
+				-- Go to the newly created message directory
+				delay DELAY_AMOUNT
+				keystroke "g" using {command down, shift down}
+				delay DELAY_AMOUNT
+				keystroke targetPath
+				keystroke "/"
+				keystroke fileNameBase
+				delay DELAY_AMOUNT
+				key code 36
+				
+				-- Press Enter again to confirm the save dialog
+				delay DELAY_AMOUNT
+				key code 36
+				*)
+				
+				-- Close the message window
+				delay DELAY_AMOUNT
+				keystroke "w" using {command down}
+			end tell
+		end tell
+		
+		-- Saving of attachements outside of tell
+		-- Otherwise the "mail attachements" part doesn't really work
+		
+		set attachCount to count of (mail attachments of theMessage)
+		if attachCount is not 0 then
+			tell theMessage
+				repeat with anAttachment in (mail attachments)
+					-- check that your system return the name with its extension
+					set theName to name of anAttachment
+					tell me to set aFile to (targetPath & "/" & fileNameBase & "/" & theName) as «class furl»
+					save anAttachment in aFile
+				end repeat
+			end tell
+		end if
+		
+		
+	end repeat
+end tell
+
+display dialog "DONE!"
+
+
+# Helper functions
+on padNumber(n)
+	if n < 10 then
+		return "0" & n
+	else
+		return n as string
+	end if
+end padNumber
+
+on sanitizeFilename(theText)
+	set badChars to {":", "/", "\\", "*", "?", "\"", "<", ">", "|"}
+	set cleanText to theText
+	
+	repeat with c in badChars
+		set AppleScript's text item delimiters to c
+		set textItems to text items of cleanText
+		set AppleScript's text item delimiters to "-"
+		set cleanText to textItems as string
+	end repeat
+	
+	set AppleScript's text item delimiters to ""
+	
+	-- Convert accented chars to ASCII equivalents
+	set cmd to "printf %s " & quoted form of cleanText & " | " & ¬
+		"iconv -f UTF-8 -t ASCII//TRANSLIT | " & ¬
+		"tr ' /:' '___' | " & ¬
+		"tr -cd '[:alnum:]_.-'"
+	
+	return do shell script cmd
+end sanitizeFilename
+
+on replace_chars(this_text, search_string, replacement_string)
+	set AppleScript's text item delimiters to the search_string
+	set the item_list to every text item of this_text
+	set AppleScript's text item delimiters to the replacement_string
+	set this_text to the item_list as string
+	set AppleScript's text item delimiters to ""
+	return this_text
+end replace_chars
